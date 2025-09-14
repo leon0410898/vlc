@@ -99,6 +99,9 @@ struct picture_t
 
     /** Next picture in a FIFO a pictures */
     struct picture_t *p_next;
+
+    /**< original PTS of the frame */
+    vlc_tick_t      i_pts;
 };
 
 /**

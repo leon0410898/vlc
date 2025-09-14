@@ -39,6 +39,12 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/mem.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/frame.h>
+#include <libavutil/motion_vector.h>
+#include <libavutil/rational.h>
+#include <libavutil/avutil.h>
+#include <libavutil/mathematics.h> // av_rescale_q
+#include "sideinfo_bus.h"
 #if (LIBAVUTIL_VERSION_MICRO >= 100 && LIBAVUTIL_VERSION_INT >= AV_VERSION_INT( 55, 16, 101 ) )
 #include <libavutil/mastering_display_metadata.h>
 #endif
@@ -126,6 +132,74 @@ static uint32_t ffmpeg_CodecTag( vlc_fourcc_t fcc )
 /*****************************************************************************
  * Local Functions
  *****************************************************************************/
+/* 小工具 */
+static inline int tb_valid(AVRational r){ return r.num > 0 && r.den > 0; }
+static inline vlc_tick_t ff_ts_to_vlc_us(int64_t ts, AVRational tb){
+    if (ts == AV_NOPTS_VALUE) return VLC_TICK_INVALID;
+    if (!tb_valid(tb)) tb = AV_TIME_BASE_Q;
+    /* 轉成 VLC CLOCK_FREQ（每秒 1e6 tick） */
+    return (vlc_tick_t)av_rescale_q(ts, tb, (AVRational){CLOCK_FREQ, 1});
+}
+
+static void codec_info_push_from_avframe(decoder_t *p_dec, 
+                                         const AVFrame *frame,
+                                         const AVCodecContext *avctx,
+                                         vlc_tick_t i_pts)
+{
+    if (!frame || !avctx) return;
+
+    sidebus_t *bus = sidebus_acquire(p_dec->obj.libvlc);
+    if (!bus) return;
+#define SIDEINFO_CNT 1
+    static const int codec_info_flag[SIDEINFO_CNT] = {
+        //AV_FRAME_DATA_MOTION_VECTORS,
+        AV_FRAME_DATA_QP_TABLE_DATA,
+        //AV_FRAME_DATA_BLK_TYPE,
+        //AV_FRAME_DATA_RES_SIZE,
+    };
+    vlc_side_entry_t entry_list[SIDEINFO_CNT];
+    vlc_side_entry_t *head = NULL, **tail = &head;
+
+    for (int i = 0; i < SIDEINFO_CNT; i++) {
+        const AVFrameSideData *sd =
+            av_frame_get_side_data(frame, codec_info_flag[i]);
+        if (!sd) return;
+
+        vlc_side_entry_t e = {
+            .type  = codec_info_flag[i],
+            .flags = 0,
+            .size  = (uint32_t)sd->size,
+            .data  = (uint8_t*)sd->data,
+            .next  = NULL,
+        };
+        memcpy(&entry_list[i], &e, sizeof(e));
+        *tail = &entry_list[i]; tail = &entry_list[i].next;
+    }
+
+    if (i_pts == VLC_TICK_INVALID) {
+        AVRational tb = tb_valid(avctx->pkt_timebase) ? avctx->pkt_timebase
+                         : tb_valid(avctx->time_base)  ? avctx->time_base
+                         : AV_TIME_BASE_Q;
+        int64_t ts = (frame->pts != AV_NOPTS_VALUE) ? frame->pts
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(52,0,0)
+                   : frame->best_effort_timestamp;
+#else
+                   : AV_NOPTS_VALUE;
+#endif
+        i_pts = ff_ts_to_vlc_us(ts, tb);
+    }
+
+    msg_Dbg(p_dec, "SIDEINFO push: when=%" PRId64 "", (int64_t)i_pts);
+
+    if (i_pts != VLC_TICK_INVALID) {
+        vlc_side_packet_t pkt = {
+            .pts      = i_pts,
+            .head     = head,
+            .codec_id = avctx->codec_id,
+        };
+        sidebus_push(bus, &pkt);
+    }
+}
 
 /**
  * Sets the decoder output format.
@@ -497,6 +571,14 @@ static int InitVideoDecCommon( decoder_t *p_dec )
 
     if( var_CreateGetBool( p_dec, "avcodec-fast" ) )
         p_context->flags2 |= AV_CODEC_FLAG2_FAST;
+
+#ifdef AV_CODEC_FLAG2_EXPORT_MVS
+    p_context->flags2 |= AV_CODEC_FLAG2_EXPORT_MVS;
+#endif
+    p_context->flags3 |= AV_CODEC_FLAG3_EXPORT_QP_PROPERTY;
+    p_context->flags3 |= AV_CODEC_FLAG3_EXPORT_QP_TABLE;
+    p_context->flags3 |= AV_CODEC_FLAG3_EXPORT_BLK_TYPE;
+    p_context->flags3 |= AV_CODEC_FLAG3_EXPORT_RES_SIZE;
 
     /* ***** libavcodec frame skipping ***** */
     p_sys->b_hurry_up = var_CreateGetBool( p_dec, "avcodec-hurry-up" );
@@ -1405,6 +1487,12 @@ static picture_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block, bool *error
                 av_frame_free(&frame);
                 break;
             }
+        }
+
+        /* 在這裡 push：用「即將送顯示的那一幀」的 picture->date 對齊 */
+        p_pic->i_pts = i_pts;
+        if (i_pts != VLC_TICK_INVALID) {
+            codec_info_push_from_avframe(p_dec, frame, p_sys->p_context, i_pts);
         }
 
         if( !p_dec->fmt_in.video.i_sar_num || !p_dec->fmt_in.video.i_sar_den )

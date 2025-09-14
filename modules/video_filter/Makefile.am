@@ -2,6 +2,12 @@ video_filterdir = $(pluginsdir)/video_filter
 
 noinst_HEADERS += video_filter/filter_picture.h
 
+## NEW: sideinfo overlay filter
+libsideinfo_overlay_plugin_la_SOURCES = video_filter/sideinfo_overlay.c
+libsideinfo_overlay_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/modules/common
+libsideinfo_overlay_plugin_la_LIBADD = $(AM_LIBADD) $(top_builddir)/modules/common/libsideinfo_bus.la
+libsideinfo_overlay_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(video_filterdir)'
+
 # video filters
 libedgedetection_plugin_la_SOURCES = video_filter/edgedetection.c
 libedgedetection_plugin_la_LIBADD = $(LIBM)
@@ -68,6 +74,7 @@ libwave_plugin_la_SOURCES = video_filter/wave.c
 libwave_plugin_la_LIBADD = $(LIBM)
 
 video_filter_LTLIBRARIES = \
+	libsideinfo_overlay_plugin.la \
 	libadjust_plugin.la \
 	libalphamask_plugin.la \
 	libball_plugin.la \

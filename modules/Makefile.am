@@ -6,9 +6,10 @@ check_PROGRAMS =
 EXTRA_DIST =
 
 EXTRA_SUBDIRS = \
-	hw/mmal
+	hw/mmal \
+	common
 
-SUBDIRS = .
+SUBDIRS = common .
 DIST_SUBDIRS = . $(EXTRA_SUBDIRS)
 if HAVE_MMAL
 SUBDIRS += hw/mmal

@@ -386,7 +386,8 @@ endif
 libavcodec_plugin_la_CFLAGS = $(AVCODEC_CFLAGS) $(AM_CFLAGS)
 libavcodec_plugin_la_LIBADD = $(AVCODEC_LIBS) $(LIBM) libavcodec_common.la
 libavcodec_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(SYMBOLIC_LDFLAGS)
-
+libavcodec_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/modules/common
+libavcodec_plugin_la_LIBADD += $(top_builddir)/modules/common/libsideinfo_bus.la
 if MERGE_FFMPEG
 libavcodec_plugin_la_SOURCES += demux/avformat/demux.c access/avio.c packetizer/avparser.c
 libavcodec_plugin_la_CFLAGS += $(AVFORMAT_CFLAGS) $(AVUTIL_CFLAGS)

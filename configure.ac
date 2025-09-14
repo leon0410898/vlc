@@ -4363,6 +4363,7 @@ AC_CONFIG_FILES([
   Makefile
   doc/Makefile
   modules/Makefile
+  modules/common/Makefile
   m4/Makefile
   po/Makefile.in
   share/Makefile
